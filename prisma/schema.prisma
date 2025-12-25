@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  home      Home?    @relation(fields: [homeId], references: [id])
+  homeId    String?
+  status    TagStatus @default(UNCLAIMED)
+  createdAt DateTime @default(now())
+}
+
+model Home {
+  id        String   @id @default(cuid())
+  label     String   // "Smith Log Home"
+  address   String?
+  notes     String?
+  tags      Tag[]
+  events    ServiceEvent[]
+  createdAt DateTime @default(now())
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  email     String?
+  website   String?
+  events    ServiceEvent[]
+}
+
+model ServiceEvent {
+  id          String   @id @default(cuid())
+  home        Home     @relation(fields: [homeId], references: [id])
+  homeId      String
+  company     Company? @relation(fields: [companyId], references: [id])
+  companyId   String?
+  serviceType ServiceType
+  performedOn DateTime
+  notes       String?
+  materials   MaterialUsage[]
+  createdAt   DateTime @default(now())
+}
+
+model MaterialUsage {
+  id           String   @id @default(cuid())
+  event        ServiceEvent @relation(fields: [eventId], references: [id])
+  eventId      String
+  category     MaterialCategory
+  brand        String
+  productLine  String?
+  colorName    String?
+  colorCode    String?  // IMPORTANT: stain name/number
+  batchLot     String?
+  createdAt    DateTime @default(now())
+}
+
+enum TagStatus {
+  UNCLAIMED
+  CLAIMED
+  REPLACED
+}
+
+enum ServiceType {
+  MEDIA_BLAST
+  RESTAIN
+  RECHINK
+  INSPECTION
+  WASH
+  OTHER
+}
+
+enum MaterialCategory {
+  STAIN
+  CHINKING
+  SEALANT
+  CLEANER
+  OTHER
+}
