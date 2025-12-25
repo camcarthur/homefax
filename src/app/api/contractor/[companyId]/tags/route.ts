@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
 
-const SERVICE_INTERVAL_YEARS: Record<
-  "RESTAIN" | "RECHINK" | "WASH" | "INSPECTION" | "MEDIA_BLAST",
-  number
-> = {
+const SERVICE_INTERVAL_YEARS = {
   RESTAIN: 3,
   RECHINK: 10,
   WASH: 1,
   INSPECTION: 1,
   MEDIA_BLAST: 7,
-};
+} as const;
+
+type ServiceKey = keyof typeof SERVICE_INTERVAL_YEARS;
 
 function addYears(date: Date, years: number) {
   const d = new Date(date);
@@ -19,18 +17,20 @@ function addYears(date: Date, years: number) {
   return d;
 }
 
-// Type for the exact shape we return from Prisma
-type TagWithHomeEvents = Prisma.TagGetPayload<{
-  include: {
-    home: {
-      include: {
-        events: {
-          include: { company: true };
-        };
-      };
-    };
-  };
-}>;
+// Explicit type so TS never falls back to `any`
+type TagRow = {
+  code: string;
+  status: string;
+  home: {
+    id: string;
+    label: string;
+    address: string | null;
+    events: Array<{
+      serviceType: string;
+      performedOn: Date;
+    }>;
+  } | null;
+};
 
 export async function GET(
   _req: Request,
@@ -38,7 +38,8 @@ export async function GET(
 ) {
   const { companyId } = await params;
 
-  const tags: TagWithHomeEvents[] = await prisma.tag.findMany({
+  // Use select to keep payload small + predictable typing
+  const tags: TagRow[] = await prisma.tag.findMany({
     where: {
       home: {
         is: {
@@ -46,12 +47,20 @@ export async function GET(
         },
       },
     },
-    include: {
+    select: {
+      code: true,
+      status: true,
       home: {
-        include: {
+        select: {
+          id: true,
+          label: true,
+          address: true,
           events: {
             orderBy: { performedOn: "desc" },
-            include: { company: true },
+            select: {
+              serviceType: true,
+              performedOn: true,
+            },
           },
         },
       },
@@ -61,37 +70,43 @@ export async function GET(
 
   const now = new Date();
 
-  const result = tags.map((t: TagWithHomeEvents) => {
-    const home = t.home!;
-    const events = home.events;
+  const result = tags
+    .filter((t) => t.home) // should always be true given the where clause, but keeps TS happy
+    .map((t) => {
+      const home = t.home!;
+      const events = home.events;
 
-    const nextDue: Record<
-      string,
-      { last?: string; due?: string; overdue: boolean }
-    > = {};
-
-    for (const [serviceType, years] of Object.entries(SERVICE_INTERVAL_YEARS)) {
-      const last = events.find((e) => e.serviceType === serviceType);
-      if (!last) {
-        nextDue[serviceType] = { overdue: false };
-        continue;
-      }
-
-      const due = addYears(new Date(last.performedOn), years);
-
-      nextDue[serviceType] = {
-        last: new Date(last.performedOn).toISOString(),
-        due: due.toISOString(),
-        overdue: due.getTime() < now.getTime(),
+      const nextDue: Record<
+        ServiceKey,
+        { last?: string; due?: string; overdue: boolean }
+      > = {
+        RESTAIN: { overdue: false },
+        RECHINK: { overdue: false },
+        WASH: { overdue: false },
+        INSPECTION: { overdue: false },
+        MEDIA_BLAST: { overdue: false },
       };
-    }
 
-    return {
-      tag: { code: t.code, status: t.status },
-      home: { id: home.id, label: home.label, address: home.address ?? null },
-      nextDue,
-    };
-  });
+      (Object.keys(SERVICE_INTERVAL_YEARS) as ServiceKey[]).forEach((serviceType) => {
+        const years = SERVICE_INTERVAL_YEARS[serviceType];
+        const last = events.find((e) => e.serviceType === serviceType);
+
+        if (!last) return;
+
+        const due = addYears(new Date(last.performedOn), years);
+        nextDue[serviceType] = {
+          last: new Date(last.performedOn).toISOString(),
+          due: due.toISOString(),
+          overdue: due.getTime() < now.getTime(),
+        };
+      });
+
+      return {
+        tag: { code: t.code, status: t.status },
+        home: { id: home.id, label: home.label, address: home.address ?? null },
+        nextDue,
+      };
+    });
 
   return NextResponse.json({ tags: result });
 }
