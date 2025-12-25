@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
-const SERVICE_INTERVAL_YEARS: Record<string, number> = {
+const SERVICE_INTERVAL_YEARS: Record<
+  "RESTAIN" | "RECHINK" | "WASH" | "INSPECTION" | "MEDIA_BLAST",
+  number
+> = {
   RESTAIN: 3,
   RECHINK: 10,
   WASH: 1,
@@ -15,13 +19,26 @@ function addYears(date: Date, years: number) {
   return d;
 }
 
+// Type for the exact shape we return from Prisma
+type TagWithHomeEvents = Prisma.TagGetPayload<{
+  include: {
+    home: {
+      include: {
+        events: {
+          include: { company: true };
+        };
+      };
+    };
+  };
+}>;
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ companyId: string }> }
 ) {
   const { companyId } = await params;
 
-  const tags = await prisma.tag.findMany({
+  const tags: TagWithHomeEvents[] = await prisma.tag.findMany({
     where: {
       home: {
         is: {
@@ -44,11 +61,14 @@ export async function GET(
 
   const now = new Date();
 
-  const result = tags.map((t) => {
+  const result = tags.map((t: TagWithHomeEvents) => {
     const home = t.home!;
     const events = home.events;
 
-    const nextDue: Record<string, { last?: string; due?: string; overdue: boolean }> = {};
+    const nextDue: Record<
+      string,
+      { last?: string; due?: string; overdue: boolean }
+    > = {};
 
     for (const [serviceType, years] of Object.entries(SERVICE_INTERVAL_YEARS)) {
       const last = events.find((e) => e.serviceType === serviceType);
@@ -56,7 +76,9 @@ export async function GET(
         nextDue[serviceType] = { overdue: false };
         continue;
       }
+
       const due = addYears(new Date(last.performedOn), years);
+
       nextDue[serviceType] = {
         last: new Date(last.performedOn).toISOString(),
         due: due.toISOString(),

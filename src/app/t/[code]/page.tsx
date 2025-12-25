@@ -7,7 +7,7 @@ export default async function TagPage({
 }) {
   const { code } = await params;
 
-  const res = await fetch(`http://localhost:3000/api/tags/${code}`, {
+  const res = await fetch(`/api/tags/${code}`, {
     cache: "no-store",
   });
 
